@@ -1,0 +1,539 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>海战象棋 - 双方对战</title>
+    <style>
+        :root {
+            --bg: #0c1018;
+            --panel: #151c27;
+            --panel-2: #1d2634;
+            --grid: #2f3d52;
+            --hex: #1a2230;
+            --hex-hover: #253145;
+            --accent: #51ffd6;
+            --attack: rgba(255, 87, 87, 0.45);
+            --player-a: #48c2ff;
+            --player-b: #ff8b8b;
+            --pawn: #6fcf97;
+            --rook: #5aa9e6;
+            --knight: #b388ff;
+            --bishop: #ff7676;
+            --carrier: #ffc857;
+            --plane: #f4f269;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            background: radial-gradient(circle at 20% 0%, #142037, var(--bg) 45%);
+            color: #eaf2ff;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 340px;
+            background: linear-gradient(180deg, var(--panel), #101722);
+            border-right: 1px solid #30405b;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 10;
+            overflow-y: auto;
+            direction: rtl;
+            scrollbar-gutter: stable both-edges;
+        }
+
+        #sidebar > * {
+            direction: ltr;
+        }
+
+        h2, h3, h4 { margin: 0; }
+        .card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid #2a3b56;
+            border-radius: 8px;
+            padding: 10px;
+            line-height: 1.5;
+            font-size: 13px;
+        }
+
+        .phase-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .deploy-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        button {
+            background: var(--panel-2);
+            border: 1px solid #3a4d6d;
+            color: #f1f5ff;
+            padding: 9px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        button:hover { border-color: var(--accent); }
+        button.active {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(81, 255, 214, 0.35) inset;
+        }
+        button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        #view-port {
+            flex: 1;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        svg { width: 100%; height: 100%; touch-action: none; }
+        .hex {
+            fill: var(--hex);
+            stroke: var(--grid);
+            stroke-width: 1;
+            transition: 0.12s;
+            cursor: pointer;
+        }
+        .hex:hover { fill: var(--hex-hover); }
+
+        .range-attack { fill: rgba(255, 87, 87, 0.42); pointer-events: none; }
+        .range-move { pointer-events: none; }
+        .move-marker-ring {
+            fill: none;
+            stroke: rgba(238, 244, 255, 0.98);
+            stroke-width: 2.6;
+            stroke-dasharray: 5 3;
+            filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6));
+            pointer-events: none;
+        }
+        .move-marker-dot {
+            fill: #ffffff;
+            stroke: rgba(22, 28, 40, 0.95);
+            stroke-width: 1.2;
+            filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7));
+            pointer-events: none;
+        }
+
+        #layer-piece { pointer-events: none; }
+
+        .piece-shape {
+            fill: none;
+            stroke-width: 3;
+            stroke-linejoin: round;
+        }
+
+        .piece-body { opacity: 0.97; }
+        .main-dot { fill: #fff; stroke: #000; stroke-width: 1; }
+        .carrier-status { fill: var(--plane); stroke: #000; stroke-width: 1; }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 100px;
+            border: 1px solid #3a4d6d;
+            font-size: 12px;
+            margin-right: 6px;
+        }
+
+        #status-log {
+            min-height: 280px;
+            max-height: none;
+            overflow: auto;
+            font-size: 12px;
+            color: #d3def2;
+            border-top: 1px dashed #395173;
+            padding-top: 8px;
+            flex: 1 1 auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h2>海战象棋</h2>
+
+        <div class="card">
+            <div><span class="tag">当前玩家</span><b id="ui-player">A 方</b></div>
+            <div><span class="tag">当前阶段</span><b id="ui-phase">攻击阶段</b></div>
+            <div><span class="tag">回合计数</span><b id="ui-round">1</b></div>
+        </div>
+
+        <div class="phase-row">
+            <button id="btn-attack">执行攻击阶段</button>
+            <button id="btn-end-move">结束移动阶段</button>
+        </div>
+        <button id="btn-undo">撤销上一步</button>
+
+        <div class="card">
+            <h4 style="margin-bottom:8px;">部署面板</h4>
+            <div class="phase-row" style="margin-bottom:8px;">
+                <button id="deploy-side-a" class="active">部署 A 方</button>
+                <button id="deploy-side-b">部署 B 方</button>
+            </div>
+            <div id="deploy-btns" class="deploy-grid">
+                <button data-type="PAWN">兵 Pawn</button>
+                <button data-type="ROOK">车 Rook</button>
+                <button data-type="KNIGHT">马 Knight</button>
+                <button data-type="BISHOP">象 Bishop</button>
+                <button data-type="CARRIER">母舰 Carrier</button>
+                <button id="btn-deploy-cancel">取消部署</button>
+            </div>
+        </div>
+
+        <div class="card" id="unit-ops" style="display:none">
+            <h4 id="sel-name">未选中</h4>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                <div class="phase-row">
+                    <button id="btn-rotate-cw">顺时针旋转 (R)</button>
+                    <button id="btn-rotate-ccw">逆时针旋转 (E)</button>
+                </div>
+                <button id="btn-takeoff" style="display:none">飞机起飞</button>
+                <button id="btn-recall" style="display:none">飞机召回</button>
+                <button id="btn-del">移除单位 (D)</button>
+            </div>
+            <div id="threat-info" style="margin-top:8px; font-size:12px; color:#c9d9f6;"></div>
+        </div>
+
+        <div class="card">
+            <b>操作规则</b><br>
+            1. 先执行攻击阶段（自动结算并移除被击中敌方单位）<br>
+            2. 攻击后自动检查并召回己方飞机<br>
+            3. 移动阶段可移动多枚棋子：先旋转（R/E），再直线移动（可不动）<br>
+            4. 移动后该棋子本阶段不可再旋转
+        </div>
+
+        <div class="card" id="status-log"></div>
+    </div>
+
+    <div id="view-port">
+        <svg id="main-svg" viewBox="-550 -400 1100 800">
+            <g id="layer-grid"></g>
+            <g id="layer-range"></g>
+            <g id="layer-piece"></g>
+            <g id="layer-range-top"></g>
+        </svg>
+    </div>
+
+    <script id="initial-state" type="application/json">
+{
+    "currentPlayer":  "A",
+    "phase":  "attack",
+    "round":  1,
+    "pieces":  [
+                   {
+                       "id":  "A-R1",
+                       "side":  "A",
+                       "type":  "ROOK",
+                       "q":  -8,
+                       "r":  6,
+                       "dir":  5
+                   },
+                   {
+                       "id":  "A-R2",
+                       "side":  "A",
+                       "type":  "ROOK",
+                       "q":  2,
+                       "r":  6,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-K1",
+                       "side":  "A",
+                       "type":  "KNIGHT",
+                       "q":  -7,
+                       "r":  6,
+                       "dir":  5
+                   },
+                   {
+                       "id":  "A-K2",
+                       "side":  "A",
+                       "type":  "KNIGHT",
+                       "q":  1,
+                       "r":  6,
+                       "dir":  5
+                   },
+                   {
+                       "id":  "A-B1",
+                       "side":  "A",
+                       "type":  "BISHOP",
+                       "q":  -5,
+                       "r":  6,
+                       "dir":  4
+                   },
+                   {
+                       "id":  "A-B2",
+                       "side":  "A",
+                       "type":  "BISHOP",
+                       "q":  -1,
+                       "r":  6,
+                       "dir":  5
+                   },
+                   {
+                       "id":  "A-C",
+                       "side":  "A",
+                       "type":  "CARRIER",
+                       "q":  -3,
+                       "r":  6,
+                       "dir":  4
+                   },
+                   {
+                       "id":  "A-PL",
+                       "side":  "A",
+                       "type":  "PLANE",
+                       "q":  -3,
+                       "r":  6,
+                       "dir":  0,
+                       "carrierId":  "A-C",
+                       "isOnCarrier":  true
+                   },
+                   {
+                       "id":  "A-P1",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -8,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P2",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -7,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P3",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -5,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P4",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -4,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P5",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -2,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P6",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  -1,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P7",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  1,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P8",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  2,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P9",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  4,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "A-P0",
+                       "side":  "A",
+                       "type":  "PAWN",
+                       "q":  5,
+                       "r":  3,
+                       "dir":  0
+                   },
+                   {
+                       "id":  "B-R1",
+                       "side":  "B",
+                       "type":  "ROOK",
+                       "q":  8,
+                       "r":  -6,
+                       "dir":  2
+                   },
+                   {
+                       "id":  "B-R2",
+                       "side":  "B",
+                       "type":  "ROOK",
+                       "q":  -2,
+                       "r":  -6,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-K1",
+                       "side":  "B",
+                       "type":  "KNIGHT",
+                       "q":  7,
+                       "r":  -6,
+                       "dir":  2
+                   },
+                   {
+                       "id":  "B-K2",
+                       "side":  "B",
+                       "type":  "KNIGHT",
+                       "q":  -1,
+                       "r":  -6,
+                       "dir":  2
+                   },
+                   {
+                       "id":  "B-B1",
+                       "side":  "B",
+                       "type":  "BISHOP",
+                       "q":  5,
+                       "r":  -6,
+                       "dir":  1
+                   },
+                   {
+                       "id":  "B-B2",
+                       "side":  "B",
+                       "type":  "BISHOP",
+                       "q":  1,
+                       "r":  -6,
+                       "dir":  2
+                   },
+                   {
+                       "id":  "B-C",
+                       "side":  "B",
+                       "type":  "CARRIER",
+                       "q":  3,
+                       "r":  -6,
+                       "dir":  1
+                   },
+                   {
+                       "id":  "B-PL",
+                       "side":  "B",
+                       "type":  "PLANE",
+                       "q":  3,
+                       "r":  -6,
+                       "dir":  3,
+                       "carrierId":  "B-C",
+                       "isOnCarrier":  true
+                   },
+                   {
+                       "id":  "B-P1",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  8,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P2",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  7,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P3",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  5,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P4",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  4,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P5",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  2,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P6",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  1,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P7",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  -1,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P8",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  -2,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P9",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  -4,
+                       "r":  -3,
+                       "dir":  3
+                   },
+                   {
+                       "id":  "B-P0",
+                       "side":  "B",
+                       "type":  "PAWN",
+                       "q":  -5,
+                       "r":  -3,
+                       "dir":  3
+                   }
+               ]
+}
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>
+
+
+
+
+
